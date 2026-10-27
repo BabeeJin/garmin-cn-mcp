@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "garmin-cn": {
+      "command": "python",
+      "args": ["/absolute/path/to/garmin_cn_mcp.py"],
+      "env": {
+        "GARMIN_CN_EMAIL": "your-garmin-email@example.com",
+        "GARMIN_CN_PASSWORD": "your-password"
+      }
+    }
+  }
+}

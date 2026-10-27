@@ -77,6 +77,11 @@ def _get_api() -> Garmin:
             api._load_profile_and_settings()
         except Exception:
             pass
+    # 加载社交档案以拿到真实昵称(full_name)；国行账号的 display_name 常为 UUID 而非昵称
+    try:
+        api._load_social_profile()
+    except Exception:
+        pass
     _api = api
     return api
 
@@ -224,8 +229,18 @@ def get_devices() -> str:
 
 @mcp.tool()
 def get_user_profile() -> str:
-    """获取用户资料信息（含 displayName 等）。"""
-    return _safe(lambda: _dump(_get_api().get_user_profile()))
+    """获取用户资料信息（含 displayName/fullName 昵称、username 等）。"""
+    def run():
+        api = _get_api()
+        prof = api.get_user_profile()
+        if isinstance(prof, dict):
+            prof = dict(prof)
+            # garminconnect 的 get_user_profile() 不返回昵称；真实昵称在社交档案 full_name
+            prof["displayName"] = getattr(api, "full_name", None)
+            prof["fullName"] = getattr(api, "full_name", None)
+            prof["username"] = getattr(api, "username", None)
+        return prof
+    return _safe(lambda: _dump(run()))
 
 
 # ─── 训练库与写入 Workouts (read + write) ─────────────────────────

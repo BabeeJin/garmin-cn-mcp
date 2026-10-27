@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+
+# Virtual environments / 虚拟环境
+.venv/
+venv/
+env/
+
+# Secrets & local config — NEVER commit / 切勿提交
+.env
+*.env
+.mcp.json
+garmin_cn_session.json
+garmin_tokens/
+
+# Local test scripts / 本地测试脚本
+test_login.py
+
+# OS
+.DS_Store
+Thumbs.db

@@ -6,6 +6,8 @@ A Model Context Protocol (MCP) server that lets AI assistants (Claude, CodeBuddy
 
 通过 MCP 协议，让 AI 助手（Claude、WorkBuddy 及任意 MCP 客户端）**读取并写入**你的佳明中国大陆版（garmin.cn）健康、运动与训练数据——包括<span style="background-color:#ffff00; font-weight:bold;">创建、排程、推送训练到设备</span>。
 
+> 📖 **新手保姆级教程 / Beginner step-by-step tutorial**: [WorkBuddy傻瓜教程.md](WorkBuddy傻瓜教程.md) — 从装 Python 到接入 WorkBuddy，全程点哪里抄哪里，零基础可用。
+
 ---
 
 ## ✨ Features / 功能

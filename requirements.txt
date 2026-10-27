@@ -1,2 +1,2 @@
-mcp>=1.0.0
+mcp>=1.0.0,<2
 garminconnect>=0.3.11
