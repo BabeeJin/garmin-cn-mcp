@@ -51,8 +51,9 @@ The previous version only had a raw `create_workout` (hand-written full step JSO
 | 力量课 | 无支持（步骤缺动作名会在手表上显示为空） | `strength`/`hold` 步骤强制挂动作库 `category`+`exerciseName`，附 `search_exercise`（1527 动作） |
 | 更新课表 | 只有 PUT（推送常返回空列表，手表拿不到新版） | `replace_workout` 删旧建新，推送必返回 `messageStatus:"new"` |
 | 推送质量 | 推完不知道对不对 | 创建后自动 GET 回读验证（pace 值、重复组子步骤、动作名），验证不过自动删除并报错 |
+| 每组负重 | 不支持 | 力量步骤可带 `weight_kg`（克存储，国行实测回读正确），手表按组提示目标重量 |
 | 新增工具数 | — | `smart_create_workout` / `replace_workout` / `delete_workout` / `update_workout` / `search_exercise`（工具总数 15 → 20） |
-| 新增文件 | — | [workout_builder.py](workout_builder.py)：独立构建器模块，含 6 条实战验证规则与生命周期函数，可脱离 MCP 直接当库用 |
+| 新增文件 | — | [workout_builder.py](workout_builder.py)：独立构建器模块，含 7 条实战验证规则与生命周期函数，可脱离 MCP 直接当库用 |
 
 > 旧的 `create_workout` 仍然保留可用（适合已手握完整 payload 的场景）；新排课推荐走 `smart_create_workout`。  
 > The old `create_workout` remains available (for cases where you already hold a full payload); for new workouts prefer `smart_create_workout`.
@@ -282,6 +283,7 @@ Restart the client after editing. The server starts on first tool call.
     ]],
     ["repeat", 3, [
       ["hold", "平板 40″", "PLANK", "PLANK", 40],
+      ["strength", "高脚杯深蹲 ×10 @20kg", "SQUAT", "GOBLET_SQUAT", 10, {"weight_kg": 20}],
       ["rest", "休息30″", 30]
     ]],
     ["cooldown", "放松3′", 180]
@@ -303,6 +305,8 @@ Restart the client after editing. The server starts on first tool call.
    Reliable update path: pushing after a PUT may return an empty list and the watch may never receive the new version; `replace_workout` (delete + recreate) always returns `messageStatus: "new"`.
 6. **创建后回读验证**：推送前自动 GET 校验 pace 值未被置空、重复组子步骤齐全、力量步骤带动作名；验证不过会自动删除新建课表并报错。
    Read-back verification before push: checks pace values survived, repeat children intact, strength steps have exercise names; a failed check deletes the just-created workout and raises.
+7. **每组目标负重**：力量步骤可带 `weight_kg`（内部 `weightValue` 按**克**存 = kg×1000，`unitId 8 = kilogram`，国行实测可用）。一个动作步 = 一组重量；每组不同重量就每组一个步（递增组同理）。手表会在该组动作界面提示目标重量。
+   Per-set target weight: strength steps accept `weight_kg` (stored as `weightValue` in **grams** = kg×1000 with unitId 8 = kilogram; verified on the CN server). One exercise step = one set's weight — use separate steps for different weights per set. The watch prompts the target weight on that set.
 
 
 ### Return fields overview / 返回字段概览

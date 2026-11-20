@@ -71,6 +71,9 @@ TARGET_TYPES = {
 
 METER_UNIT = {"unitId": 1, "unitKey": "meter", "factor": 100.0}
 
+# 力量目标负重：weightValue 按克存储（kg×1000），unitId 8 = kilogram（国行实测可用）
+WEIGHT_UNIT_KILOGRAM = {"unitId": 8, "unitKey": "kilogram", "factor": 1000.0}
+
 _EMPTY_STROKE = {"strokeTypeId": 0, "strokeTypeKey": None, "displayOrder": 0}
 _EMPTY_EQUIPMENT = {"equipmentTypeId": 0, "equipmentTypeKey": None, "displayOrder": 0}
 
@@ -169,7 +172,8 @@ class WorkoutBuilder:
 
     def _base_step(self, order, step_type, desc, cond_key, cond_val,
                    target=None, v1=None, v2=None, unit=None,
-                   category=None, exercise=None, child=None) -> dict:
+                   category=None, exercise=None, child=None,
+                   weight_kg=None) -> dict:
         tgt = target or {"workoutTargetTypeId": TARGET_TYPES["no.target"],
                          "workoutTargetTypeKey": "no.target", "displayOrder": 1}
         return {
@@ -198,8 +202,8 @@ class WorkoutBuilder:
             "exerciseName": exercise,
             "workoutProvider": None,
             "providerExerciseSourceId": None,
-            "weightValue": None,
-            "weightUnit": None,
+            "weightValue": (float(weight_kg) * 1000.0) if weight_kg is not None else None,
+            "weightUnit": dict(WEIGHT_UNIT_KILOGRAM) if weight_kg is not None else None,
         }
 
     def _next(self) -> int:
@@ -254,8 +258,10 @@ class WorkoutBuilder:
         return self
 
     def strength(self, desc: str, category: str, exercise: str,
-                 reps: Optional[int] = None, secs: Optional[int] = None) -> "WorkoutBuilder":
-        """力量动作步。次数用 reps=，静力（平板等）用 secs=。
+                 reps: Optional[int] = None, secs: Optional[int] = None,
+                 weight_kg: Optional[float] = None) -> "WorkoutBuilder":
+        """力量动作步。次数用 reps=，静力（平板等）用 secs=，目标负重用 weight_kg=。
+        一个动作步 = 一组；每组不同重量就每组一个步（递增组同理）。
         (category, exercise) 必须来自动作库，可用 search_exercise() 查。"""
         if not validate_exercise(category, exercise):
             raise ValueError(f"动作 ({category}, {exercise}) 不在动作库内，用 search_exercise() 查合法值")
@@ -263,7 +269,8 @@ class WorkoutBuilder:
             raise ValueError("strength 步必须且只能指定 reps 或 secs 之一")
         cond = ("reps", reps) if reps is not None else ("time", secs)
         self._steps.append(self._base_step(self._next(), "interval", desc, cond[0], cond[1],
-                                           category=category, exercise=exercise))
+                                           category=category, exercise=exercise,
+                                           weight_kg=weight_kg))
         return self
 
     def repeat(self, iterations: int, children: list) -> dict:
@@ -310,11 +317,11 @@ class WorkoutBuilder:
 
     def repeat_strength(self, iterations: int, work_desc: str, category: str,
                         exercise: str, reps: Optional[int], rest_secs: int,
-                        secs: Optional[int] = None) -> "WorkoutBuilder":
-        """经典力量组：动作（次数或静力秒数）+ 休息。"""
+                        secs: Optional[int] = None, weight_kg: Optional[float] = None) -> "WorkoutBuilder":
+        """经典力量组：动作（次数或静力秒数）+ 休息。weight_kg= 目标负重，组内统一。"""
         wb = WorkoutBuilder(self.sport["sportTypeKey"])
         wb._counter = self._counter
-        wb.strength(work_desc, category, exercise, reps=reps, secs=secs)
+        wb.strength(work_desc, category, exercise, reps=reps, secs=secs, weight_kg=weight_kg)
         wb.rest(f"休息 {rest_secs}″，换下一组", rest_secs)
         self._counter = wb._counter
         self.repeat(iterations, wb._steps)
@@ -376,9 +383,11 @@ def build_from_spec(spec: dict) -> dict:
             opts = s[3] if len(s) > 3 else {}
             b.run_distance(s[1], int(s[2]), pace=opts.get("pace"))
         elif kind == "strength":
-            b.strength(s[1], s[2], s[3], reps=int(s[4]))
+            opts = s[5] if len(s) > 5 else {}
+            b.strength(s[1], s[2], s[3], reps=int(s[4]), weight_kg=opts.get("weight_kg"))
         elif kind == "hold":
-            b.strength(s[1], s[2], s[3], secs=int(s[4]))
+            opts = s[5] if len(s) > 5 else {}
+            b.strength(s[1], s[2], s[3], secs=int(s[4]), weight_kg=opts.get("weight_kg"))
         else:
             raise ValueError(f"未知步骤类型: {kind}")
 
