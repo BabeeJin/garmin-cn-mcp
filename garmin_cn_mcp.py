@@ -24,6 +24,8 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from garminconnect import Garmin
 
+import workout_builder as wb
+
 
 def _load_dotenv():
     """Load environment variables from a local .env file (no extra dependency).
@@ -304,6 +306,105 @@ def push_workout_to_device(workout_id: str = "", device_id: str = "") -> str:
         return _get_api().push_workout_to_device(**kwargs)
 
     return _safe(lambda: _dump(run()))
+
+
+# ─── 训练课表构建器（实战沉淀，见 workout_builder.py 模块文档） ────────
+
+
+@mcp.tool()
+def smart_create_workout(spec_json: str = "", push: bool = True, device_id: str = "") -> str:
+    """【推荐】用简化 spec 创建训练课表 → 自动回读验证 → 推送手表。
+
+    Args:
+        spec_json: 课表 spec 的 JSON 字符串。结构：
+            {
+              "sport": "running" | "strength_training",
+              "name": "11/21训练计划",
+              "description": "可选说明",
+              "steps": [
+                ["warmup",   "热身5′", 300],
+                ["run_time", "极轻松跑25′ HR≤135", 1500, {"pace": ["7:30", "8:15"]}],
+                ["run_dist", "站间跑400m", 400, {"pace": ["6:30", "6:50"]}],
+                ["time",     "自由计时段", 900],
+                ["rest",     "休息60″", 60],
+                ["strength", "TRX划船 ×15", "LATERAL_RAISE", "SUSPENDED_ROW", 15],
+                ["hold",     "平板 40″", "PLANK", "PLANK", 40],
+                ["repeat",   6, [ ...子步骤（可嵌套）... ]]
+              ]
+            }
+            pace 写 ["快端配速","慢端配速"]（"6:30" 格式，快端在前）。
+            力量/静力动作 (category, exercise) 必须来自动作库，先用 search_exercise 查。
+        push: 验证通过后是否立即推送到手表（默认 true）。
+        device_id: 设备ID，为空推送到最近使用设备。
+    """
+    def run():
+        payload = wb.build_from_spec(json.loads(spec_json or "{}"))
+        if not push:
+            return payload
+        dev = int(device_id) if device_id else None
+        return wb.create_and_push(_get_api(), payload, device_id=dev)
+    return _safe(run)
+
+
+@mcp.tool()
+def replace_workout(workout_id: str = "", spec_json: str = "", push: bool = True) -> str:
+    """【可靠更新】删除旧课表 → 用 spec 重新创建 → 回读验证 → 推送。
+
+    经验：直接 PUT 更新后推送可能返回空列表且手表拿不到新版；
+    删旧建新的推送必返回 messageStatus="new"，是唯一可靠的更新路径。
+
+    Args:
+        workout_id: 要替换的旧课表ID。
+        spec_json: 新课表 spec（同 smart_create_workout）。
+        push: 是否推送到手表（默认 true）。
+    """
+    def run():
+        payload = wb.build_from_spec(json.loads(spec_json or "{}"))
+        if not push:
+            _get_api().delete_workout(int(workout_id))
+            return {"deleted": workout_id, "payload": payload}
+        return wb.replace_workout(_get_api(), int(workout_id), payload)
+    return _safe(run)
+
+
+@mcp.tool()
+def delete_workout(workout_id: str = "") -> str:
+    """从训练库删除一个自定义训练。
+
+    Args:
+        workout_id: 训练ID。
+    """
+    return _safe(lambda: _dump(_get_api().delete_workout(int(workout_id)) or {"deleted": workout_id}))
+
+
+@mcp.tool()
+def update_workout(workout_id: str = "", workout_json: str = "") -> str:
+    """PUT 全量重写一个训练（保留 workoutId，自动去除 stepId/workoutId）。
+
+    注意：PUT 后手表可能拿不到新版，改完课表建议用 replace_workout 删旧建新。
+
+    Args:
+        workout_id: 训练ID。
+        workout_json: 完整的训练定义 JSON（同 create_workout 结构，含 stepId 也会被剥掉）。
+    """
+    def run():
+        payload = wb.strip_ids(json.loads(workout_json or "{}"))
+        _get_api().update_workout(int(workout_id), payload)
+        return wb.verify_workout(_get_api(), int(workout_id))
+    return _safe(run)
+
+
+@mcp.tool()
+def search_exercise(keyword: str = "", limit: int = 20) -> str:
+    """搜索 Garmin 动作库（1527 个动作），用于力量课步骤的 (category, exercise) 取值。
+
+    力量训练（strength_training）的动作步骤必须带库内动作名，否则手表上显示为空。
+
+    Args:
+        keyword: 关键词，如 "plank"、"row"、"squash"、中文显示名"平板"。
+        limit: 返回上限，默认 20。
+    """
+    return _safe(lambda: _dump(wb.search_exercise(keyword, max(1, int(limit)))))
 
 
 if __name__ == "__main__":

@@ -35,6 +35,27 @@ A Model Context Protocol (MCP) server that lets AI assistants (Claude, CodeBuddy
 
 ---
 
+## 🆕 What's new vs previous version / 与上一版的区别
+
+上一版只有裸的 `create_workout`（手写完整步骤 JSON）+ 排程 + 推送。本版基于一次完整的实战排课（跑课 pace.zone 配速 + 力量课 + 三日推送全流程），新增了**课表构建器层**：
+
+The previous version only had a raw `create_workout` (hand-written full step JSON) + schedule + push. This release adds a **workout builder layer**, distilled from a complete real-world training-planning session (running pace.zone workouts + strength workouts + a 3-day push lifecycle):
+
+| Change 变化 | 上一版 Before | 本版 After |
+| --- | --- | --- |
+| 课表定义 | 手写几百行完整步骤 JSON（ID/枚举全靠查） | `smart_create_workout` 用简化 spec（`["repeat",3,[...]]` DSL），配速直接写 `"6:30"` 格式 |
+| 跑课配速 | 无规范，常只写在描述文字里 | `pace.zone` 结构化目标（快端>慢端自动校验），手表表盘实测跟表执行 100% |
+| 力量课 | 无支持（步骤缺动作名会在手表上显示为空） | `strength`/`hold` 步骤强制挂动作库 `category`+`exerciseName`，附 `search_exercise`（1527 动作） |
+| 更新课表 | 只有 PUT（推送常返回空列表，手表拿不到新版） | `replace_workout` 删旧建新，推送必返回 `messageStatus:"new"` |
+| 推送质量 | 推完不知道对不对 | 创建后自动 GET 回读验证（pace 值、重复组子步骤、动作名），验证不过自动删除并报错 |
+| 新增工具数 | — | `smart_create_workout` / `replace_workout` / `delete_workout` / `update_workout` / `search_exercise`（工具总数 15 → 20） |
+| 新增文件 | — | [workout_builder.py](workout_builder.py)：独立构建器模块，含 6 条实战验证规则与生命周期函数，可脱离 MCP 直接当库用 |
+
+> 旧的 `create_workout` 仍然保留可用（适合已手握完整 payload 的场景）；新排课推荐走 `smart_create_workout`。  
+> The old `create_workout` remains available (for cases where you already hold a full payload); for new workouts prefer `smart_create_workout`.
+
+---
+
 ## 🤔 Why this exists / 为什么需要这个
 
 The Garmin China (`garmin.cn`) API architecture is different from the international (`garmin.com`) one, but the official `garminconnect` Python library **does** support China via the `is_cn=True` flag.
@@ -232,6 +253,53 @@ Restart the client after editing. The server starts on first tool call.
 | Schedule 排程         | `schedule_workout`       | `schedule_workout(workout_id, date)` |
 | Push to device 推送   | `push_workout_to_device` | `push_workout_to_device(...)`        |
 | List library 训练库    | `get_workouts`           | `get_workouts(start, limit)`         |
+| Smart build 构建       | `smart_create_workout`   | `workout_builder.create_and_push(...)` |
+| Replace 替换          | `replace_workout`        | `workout_builder.replace_workout(...)` |
+| Update 重写           | `update_workout`         | `update_workout(workout_id, payload)`  |
+| Delete 删除           | `delete_workout`         | `delete_workout(workout_id)`         |
+| Exercise search 动作库 | `search_exercise`        | `workout_builder.search_exercise(...)` |
+
+### Workout builder / 课表构建器（workout_builder.py）
+
+`smart_create_workout` / `replace_workout` / `search_exercise` 基于一个独立的构建器模块 `workout_builder.py`，封装了实战验证过的课表结构与推送生命周期：
+
+`smart_create_workout` / `replace_workout` / `search_exercise` are backed by a standalone builder module `workout_builder.py` that encodes battle-tested workout structures and the push lifecycle:
+
+**简化 spec / simplified spec**（比手写完整 step JSON 简单得多）：
+
+```json
+{
+  "sport": "strength_training",
+  "name": "TRX上肢",
+  "steps": [
+    ["warmup",   "热身3′", 180],
+    ["repeat", 3, [
+      ["strength", "TRX划船 ×15", "LATERAL_RAISE", "SUSPENDED_ROW", 15],
+      ["rest", "休息60″", 60]
+    ]],
+    ["repeat", 3, [
+      ["hold", "平板 40″", "PLANK", "PLANK", 40],
+      ["rest", "休息30″", 30]
+    ]],
+    ["cooldown", "放松3′", 180]
+  ]
+}
+```
+
+**内置的实战经验 / built-in field-tested rules**：
+
+1. **重复组对齐**：repeat 组的 `stepOrder` 全局递增，子步骤 `childStepId` 指向组本身——不对齐时服务器只保留最后一个子步骤。
+   Repeat groups: globally increasing `stepOrder`; children's `childStepId` must point at the group itself, otherwise the server silently keeps only the last child step.
+2. **跑课配速**：`pace.zone` 目标，快端 m/s 必须**大于**慢端，且步骤不得带 `zoneNumber`/`targetValueUnit`（会被服务器置空）。
+   Running pace: `pace.zone` target with fast > slow m/s; omit `zoneNumber`/`targetValueUnit` (the server blanks them out).
+3. **力量课动作名**：`strength_training` 的动作步骤必须带动作库的 `category`+`exerciseName`（用 `search_exercise` 查），否则步骤残缺——web 端红色校验「必须选择运动」，手表上显示为空。静力动作（平板等）可用秒数计时。
+   Strength steps need a valid `category`+`exerciseName` from the catalog (use `search_exercise`), otherwise the step is invalid — the web editor flags "must select an exercise" and the watch shows an empty step. Timed holds (e.g. plank) work with seconds.
+4. **混合日拆分**：力量/TRX 步骤不要放进 running 课表的 interval 步（手表会显示为跑步段）；拆成同日两份课表，或把替代练习放进 running 课表的 rest 步。
+   Mixed days: don't put strength/TRX steps into a running workout's interval steps (the watch renders them as running segments) — split into two workouts per day, or use rest steps for substitutes.
+5. **可靠更新路径**：PUT 更新后推送可能返回空列表且手表拿不到新版；`replace_workout`（删旧建新）的推送必返回 `messageStatus: "new"`。
+   Reliable update path: pushing after a PUT may return an empty list and the watch may never receive the new version; `replace_workout` (delete + recreate) always returns `messageStatus: "new"`.
+6. **创建后回读验证**：推送前自动 GET 校验 pace 值未被置空、重复组子步骤齐全、力量步骤带动作名；验证不过会自动删除新建课表并报错。
+   Read-back verification before push: checks pace values survived, repeat children intact, strength steps have exercise names; a failed check deletes the just-created workout and raises.
 
 
 ### Return fields overview / 返回字段概览
